@@ -18,8 +18,11 @@ approval_statuses = ["Approved", "Declined", "Pending"]
 weights = [65, 20, 15]  # Corresponding to 65%, 20%, and 15%
 payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
 
+last_charge = []
 # Helper function to simulate normal or fraudulent patterns
 def generate_transaction():
+    global last_charge
+        
     transaction_id = str(uuid.uuid4())[:8]
     customer_id = str(uuid.uuid4())[:8]
     timestamp = fake.date_time_this_decade()
@@ -32,13 +35,28 @@ def generate_transaction():
     payment_method = random.choice(payment_methods)
 
     # Introduce anomalies to simulate potential fraud
-    if random.random() < 0.02:  # ~2% chance of being fraudulent
+    if random.random() < 0.03:  # ~3% chance of being fraudulent
         if random.random() < 0.5:
             amount = round(random.uniform(3000.0, 10000.0), 2)  # Unusually high amount
         if random.random() < 0.5:
             location = f"{fake.city()}, {fake.state_abbr()}"  # Distant/uncommon location
         if random.random() < 0.5:
-            timestamp = fake.date_time_this_month()  # Rapid transactions in a short time frame
+            # Use the last charge for anomalies
+            if last_charge:  # Only use the last charge if it exists
+                transaction_id = last_charge[0]
+                customer_id = last_charge[1]
+                timestamp = last_charge[2]
+                merchant_name = last_charge[3]
+                category = last_charge[4]
+                amount = round(random.uniform(1.0, 5000.0), 2)  # Reset amount
+                location = last_charge[6]
+                card_type = last_charge[7]
+                approval_status = last_charge[8]
+                payment_method = last_charge[9]
+    
+    # Update last_charge with the most recent transaction data
+    last_charge = [transaction_id, customer_id, timestamp, merchant_name, category, amount, location, card_type, approval_status, payment_method]
+
 
     return {
         "Transaction ID": transaction_id,
