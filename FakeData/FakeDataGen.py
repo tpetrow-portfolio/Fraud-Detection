@@ -7,7 +7,7 @@ from faker import Faker
 fake = Faker()
 
 # Define parameters for dataset creation
-num_transactions = 75000  # Adjust this number to control the dataset size
+num_transactions = 100000  # Adjust this number to control the dataset size
 categories = [
     "Groceries", "Dining", "Travel", "Retail", "Utilities", "Healthcare",
     "Subscriptions", "Education", "Automobile", "Entertainment", "Charity",
@@ -33,6 +33,7 @@ def generate_transaction():
     card_type = random.choice(card_types)
     approval_status = random.choices(approval_statuses, weights, k=1)[0]
     payment_method = random.choice(payment_methods)
+    is_fraud = "Undetermined"
 
     # Introduce anomalies to simulate potential fraud
     if random.random() < 0.03:  # ~3% chance of being fraudulent
@@ -55,7 +56,7 @@ def generate_transaction():
                 payment_method = last_charge[9]
     
     # Update last_charge with the most recent transaction data
-    last_charge = [transaction_id, customer_id, timestamp, merchant_name, category, amount, location, card_type, approval_status, payment_method]
+    last_charge = [transaction_id, customer_id, timestamp, merchant_name, category, amount, location, card_type, approval_status, payment_method, is_fraud]
 
 
     return {
@@ -68,7 +69,8 @@ def generate_transaction():
         "Location": location,
         "Card Type": card_type,
         "Approval Status": approval_status,
-        "Payment Method": payment_method
+        "Payment Method": payment_method,
+        "Is Fraud": is_fraud
     }
 
 # Generate dataset
