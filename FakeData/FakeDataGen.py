@@ -18,13 +18,15 @@ approval_statuses = ["Approved", "Declined", "Pending"]
 weights = [65, 20, 15]  # Corresponding to 65%, 20%, and 15%
 payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
 
+uuid_list = [str(uuid.uuid4())[:8] for _ in range(5000)] # list of 5000 customer_id's
+
 last_charge = []
 # Helper function to simulate normal or fraudulent patterns
 def generate_transaction():
     global last_charge
         
     transaction_id = str(uuid.uuid4())[:8]
-    customer_id = str(uuid.uuid4())[:8]
+    customer_id = random.choice(uuid_list)
     timestamp = fake.date_time_this_decade()
     merchant_name = fake.company()
     category = random.choice(categories)
@@ -44,7 +46,7 @@ def generate_transaction():
         if random.random() < 0.5:
             # Use the last charge for anomalies
             if last_charge:  # Only use the last charge if it exists
-                transaction_id = last_charge[0]
+                transaction_id = str(uuid.uuid4())[:8]
                 customer_id = last_charge[1]
                 timestamp = last_charge[2]
                 merchant_name = last_charge[3]
