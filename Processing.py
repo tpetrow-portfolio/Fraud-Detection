@@ -6,6 +6,7 @@ import psycopg2
 import numpy as np
 import pandas as pd
 import random
+from datetime import datetime
 import uuid
 from faker import Faker
 
@@ -17,7 +18,7 @@ class Charge:
 
         self.transaction_id = transaction_id
         self.customer_id = customer_id
-        self.timestamp = timestamp
+        self.timestamp = timestamp if timestamp is not None else datetime(1970, 1, 1)  # Assign a placeholder timestamp to NULL values for easy identification
         self.merchant_name = merchant_name
         self.category = category
         self.amount = amount
@@ -43,7 +44,7 @@ class Charge:
     def set_fraud(self, update):
         self.is_fraud = update
 
-# Function to update the table with new transaction information when modified
+# Updates the table with new transaction information when modified
 def update_transaction(charge):
     # Connect to PostgreSQL Database
     conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
@@ -59,7 +60,7 @@ def update_transaction(charge):
         # Execute the SQL Query
         cur.execute(update_table_sql, (charge.customer_id, charge.timestamp, charge.merchant_name, charge.category, charge.amount, 
                                            charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud,
-                                           charge.transaction_id))
+                                           charge.transaction_id,))
 
         # Check if any rows were affected
         if cur.rowcount == 0:
@@ -146,7 +147,7 @@ def add_charge(charge):
                 charge.transaction_id, charge.customer_id, charge.timestamp, 
                 charge.merchant_name, charge.category, charge.amount, 
                 charge.location, charge.card_type, charge.approval_status, 
-                charge.payment_method, charge.is_fraud
+                charge.payment_method, charge.is_fraud,
             ))
             # Commit the addition
             conn.commit()
@@ -222,11 +223,11 @@ def find_repeat_charges(charge):
                             SELECT *
                             FROM transactions
                             WHERE customer_id = %s
+                                AND timestamp = %s
                                 AND location = %s
-                                AND timestamp != %s
                             """
             # Execute the SQL Query
-            cur.execute(find_charges_sql, (charge.customer_id, charge.location, charge.timestamp))
+            cur.execute(find_charges_sql, (charge.customer_id, charge.timestamp, charge.location,))
             duplicate_charges = cur.fetchall()
 
             # Return duplicate charges for further analysis
@@ -291,6 +292,63 @@ def calculate_average_and_std_dev(customerID):
         if conn:
             conn.close()
 
+# Checks datetime of each charge for NULL or placeholder value and asks user to update value
+def timestamp_check():
+    # Connect to PostgreSQL Database
+    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
+    cur = conn.cursor()  # Cursor that allows execution of SQL commands
+    try:
+        # SQL query to find transactions with placeholder or NULL values
+        find_null_timestamps = """
+                                SELECT * 
+                                FROM transactions 
+                                WHERE timestamp IS NULL OR timestamp = '1970-01-01'
+                                """
+        # Execute the SQL Query
+        cur.execute(find_null_timestamps)
+        missing_timestamps = cur.fetchall()
+
+        # If there are missing timestamps, prompt user to update
+        if missing_timestamps:
+            print(f"Transactions found with NULL or placeholder timestamps.")
+            for transaction in missing_timestamps:
+                transaction_id = transaction[0]
+                print(f"Transaction ID {transaction_id} has a missing timestamp.")
+                user_input = input(f"Please enter a valid timestamp for Transaction ID {transaction_id}: ")
+                if user_input:
+                    try:
+                        new_timestamp = datetime.strptime(user_input, '%Y-%m-%d %H:%M:%S')
+                        # Update the transaction's timestamp in the database
+                        update_sql = """
+                            UPDATE transactions
+                            SET timestamp = %s
+                            WHERE transaction_id = %s
+                            """
+                        # Execute the SQL Query
+                        cur.execute(update_sql, (new_timestamp, transaction_id,))
+
+                        # Commit the transaction
+                        conn.commit()
+                        print(f"Transaction ID {transaction_id} updated successfully.")
+                    except ValueError:
+                        print("Invalid date format. Please use 'YYYY-MM-DD HH:MM:SS'.")
+                else:
+                    print(f"No input received for Transaction ID {transaction_id}. Skipping update.")
+
+        else:
+            print("No transactions found with missing timestamps.")
+                    
+    except Exception as e:
+        print(f"Error updating transactions: {e}")
+        conn.rollback()  # Roll back in case of an error
+
+    finally:
+        # Close the cursor and connection
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
 # Function that takes a charge and determines fraudulence based on logic and defined rules
 # needs to go through all charges, would be time consuming, should chunk up data, maybe multithread with Pyspark
 def flag_fraud(charge):
@@ -300,7 +358,7 @@ def flag_fraud(charge):
             # Flag any charge categorized as 'Financial Services' over $1000
             if charge.category == "Financial Services" and charge.amount > 1000.00:
                 charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to [Category: {charge.category}]")
+                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to {charge.category} charge over $1000.00")
                 update_transaction(charge)
                 return True
 
@@ -315,23 +373,24 @@ def flag_fraud(charge):
             avg_spent, std_dev = calculate_average_and_std_dev(charge.customer_id)
             if std_dev > 0:  # Avoid division by zero
                 z_score = (charge.amount - avg_spent) / std_dev
-            # Flag outliers in customer spending (Z-Score > 2)
-            if abs(z_score) > 2.0:
-                charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to outlier in spending. "
-                        f"Charge Amount: ${charge.amount}, Z-Score: {z_score:.2f}")
-                update_transaction(charge)
-                return True
+                # Flag outliers in customer spending (Z-Score > 2)
+                if abs(z_score) > 2.0:
+                    charge.set_fraud("Fraud")
+                    print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to outlier in spending."
+                            f"Charge Amount: ${charge.amount}, Z-Score: {z_score:.2f}")
+                    update_transaction(charge)
+                    return True
 
             # Check for identical charges occur with same customer_id, location, and timestamp
             duplicates = find_repeat_charges(charge)
-            if duplicates:
-                for dup in duplicates:
-                    if dup["timestamp"] == charge.timestamp and dup["location"] == charge.location:
-                        charge.set_fraud("Fraud")
-                        print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to duplicate charge.")
-                        update_transaction(charge)
-                        return True
+            if len(duplicates) > 1:  # More than one charge with the same attributes
+                charge.set_fraud("Fraud")
+                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to duplicate charge. Analysis found {len(duplicates)} identical charges.")
+                update_transaction(charge)
+                return True
+            
+            
+
             
             # If none of the above conditions are met, mark as Not Fraud
             charge.set_fraud("Not Fraud")
@@ -346,11 +405,3 @@ def flag_fraud(charge):
     except Exception as e:
         print(f"Error processing transaction {charge.transaction_id}: {e}")
         return False
-
-# Testing functions
-'''
-testCharge = Charge("test")
-add_charge(testCharge)
-swipe_card()
-delete_charge("test")
-'''
