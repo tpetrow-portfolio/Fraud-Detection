@@ -1,14 +1,22 @@
 # CARD GUARD
 # Data Processing File
 
-# Import Libraries
+# Import libraries
 import psycopg2
-import numpy as np
-import pandas as pd
+from config import DATABASE_CONFIG
 import random
 from datetime import datetime
 import uuid
 from faker import Faker
+
+# Helper function that establishes a connection to the PostgreSQL database
+def database_connect(dbname, user, password, host, port=5432):
+    try:
+        conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+        return conn
+    except psycopg2.Error as e:
+        print(f"Error connecting to the database: {e}")
+        raise
 
 # Define 'Charge' class with all attributes of a charge from the database
 class Charge:
@@ -46,37 +54,31 @@ class Charge:
 
 # Updates the table with new transaction information when modified
 def update_transaction(charge):
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor()  # Cursor that allows execution of SQL commands
     try:
+        # Connect to PostgreSQL Database using the helper function
+        conn = database_connect(**DATABASE_CONFIG)
+        cur = conn.cursor()  # Cursor to execute SQL commands
+        
         # SQL query to update row with new transaction information
         update_table_sql = """
                 UPDATE transactions
                 SET customer_id = %s, timestamp = %s, merchant_name = %s, category = %s, amount = %s, 
-                location = %s, card_type = %s, approval_status = %s, payment_method = %s, is_fraud = %s
+                    location = %s, card_type = %s, approval_status = %s, payment_method = %s, is_fraud = %s
                 WHERE transaction_id = %s
                 """
         # Execute the SQL Query
-        cur.execute(update_table_sql, (charge.customer_id, charge.timestamp, charge.merchant_name, charge.category, charge.amount, 
-                                           charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud,
-                                           charge.transaction_id,))
-
-        # Check if any rows were affected
-        if cur.rowcount == 0:
-            print(f"Transaction not found in the database.")
-        else:
-            print(f"Transaction ID {charge.transaction_id} successfully updated.")
-                    
-        # Commit the transaction
+        cur.execute(update_table_sql, (
+            charge.customer_id, charge.timestamp, charge.merchant_name, charge.category, charge.amount,
+            charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud,
+            charge.transaction_id,
+        ))
+        
+        # Commit changes and close connections
         conn.commit()
-                
+        print(f"Transaction ID {charge.transaction_id} successfully updated.")
     except Exception as e:
         print(f"Error updating transaction {charge.transaction_id}: {e}")
-        conn.rollback()  # Roll back in case of an error
-
     finally:
-        # Close the cursor and connection
         if cur:
             cur.close()
         if conn:
@@ -122,10 +124,11 @@ def generate_charge():
 
 # Adds a charge to database, allows for manual charge entry
 def add_charge(charge):
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor()  # Cursor that allows execution of SQL commands
     try:
+        # Connect to PostgreSQL Database using the helper function
+        conn = database_connect(**DATABASE_CONFIG)
+        cur = conn.cursor()  # Cursor to execute SQL commands
+
         # Check if the transaction_id already exists
         check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
         cur.execute(check_sql, (charge.transaction_id,))
@@ -155,7 +158,8 @@ def add_charge(charge):
 
     except Exception as e:
         print("Failed to insert record into table:", e)
-        conn.rollback()  # Roll back the transaction in case of an error
+        if conn:
+            conn.rollback()  # Roll back the transaction in case of an error
 
     finally:
         # Close the cursor and connection
@@ -166,9 +170,9 @@ def add_charge(charge):
     
 # Removes a charge from database, allows for manual charge deletion via provided transactionID
 def delete_charge(transactionID):
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor() # Cursor that allows execution of SQL commands
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
     try:
         # Check if the transaction_id exists
         check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
@@ -208,9 +212,9 @@ def swipe_card():
 
 # Takes in a charge and finds identical charges
 def find_repeat_charges(charge):
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor()  # Cursor that allows execution of SQL commands
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
     try:
         # Check if the transaction_id exists
         check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
@@ -257,11 +261,42 @@ def find_repeat_charges(charge):
         if conn:
             conn.close()
 
-# Takes in a customer_id and finds the average amount of money spent by customer
+# Calculates the average amount of money spent by customer
+def calculate_avg_spent(customerID):
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
+    try:
+        # Query to calculate the average spending amount
+        avg_query_sql = """
+                        SELECT AVG(amount) AS avg_amount
+                        FROM transactions
+                        WHERE customer_id = %s
+                        """
+        # Execute the SQL Query
+        cur.execute(avg_query_sql, (customerID,))
+        result = cur.fetchone()
+
+        # Extract the average amount, handling NULL results from the query
+        avg_amount = result[0] if result[0] is not None else 0.0
+        return avg_amount
+
+    except Exception as e:
+        print(f"Error calculating average for customer_id {customerID}: {e}")
+        return 0.0
+
+    finally:
+        # Close the cursor and connection
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+# Takes in a customer_id and finds the average amount of money spent by customer to help with Z-Score
 def calculate_average_and_std_dev(customerID):
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor()  # Cursor that allows execution of SQL commands
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
     try:
         # Query to calculate both average and standard deviation in one query
         avg_std_query_sql = """
@@ -294,9 +329,9 @@ def calculate_average_and_std_dev(customerID):
 
 # Checks datetime of each charge for NULL or placeholder value and asks user to update value
 def timestamp_check():
-    # Connect to PostgreSQL Database
-    conn = psycopg2.connect(dbname="Credit Card Transactions", user="postgres", password="password123", host="localhost")
-    cur = conn.cursor()  # Cursor that allows execution of SQL commands
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
     try:
         # SQL query to find transactions with placeholder or NULL values
         find_null_timestamps = """
