@@ -84,6 +84,41 @@ def update_transaction(charge):
         if conn:
             conn.close()
 
+# Finds a customer's most common spending location for detecting locational anomaly fraud
+def find_typical_location(customerID):
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()
+    try:
+        # Query to find the most common location for the customer
+        location_query_sql = """
+            SELECT location, COUNT(*) AS frequency
+            FROM transactions
+            WHERE customer_id = %s
+            GROUP BY location
+            ORDER BY frequency DESC
+            LIMIT 1;
+        """
+        # Execute the SQL Query
+        cur.execute(location_query_sql, (customerID,))
+        result = cur.fetchone()
+
+        # Return the most common location or 'Unknown' if no result is found
+        if result:
+            return result[0]  # The most common location
+        else:
+            return "Unknown"
+    
+    except Exception as e:
+        print(f"Error finding typical location for customer_id {customerID}: {e}")
+        return "Unknown"
+    
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
 # Function to generate a randomized charge to simulate data from a new charge - returns a Charge
 def generate_charge():
     # Initialize Faker instance for generating realistic data
@@ -99,19 +134,56 @@ def generate_charge():
     card_types = ["Visa", "Mastercard", "American Express", "Discover"]
     # Define list of approval statuses
     approval_statuses = ["Approved", "Declined", "Pending"]
-    weights = [65, 20, 15]  # Corresponding to 65%, 20%, and 15%
+    weights = [75, 10, 15]  # Corresponding to 75%, 10%, and 15%
     # Define list of payment methods
     payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
-    uuid_list = [str(uuid.uuid4())[:8] for _ in range(5000)] # list of 5000 customer_id's
+    uuid_list = [str(uuid.uuid4())[:8] for _ in range(4000)] # list of 4000 customer_id's
+
+    # Probability of anomaly (used for location and amount)
+    anomaly_chance = 0.02  # 2%
 
     # Generate simulated charge information
-    transaction_id = str(uuid.uuid4())[:8]
+    transaction_id = str(uuid.uuid4()).replace('-', '')[:10]
     customer_id = random.choice(uuid_list)
     timestamp = fake.date_time_this_decade()
     merchant_name = fake.company()
     category = random.choice(categories)
-    amount = round(random.uniform(1.0, 5000.0), 2)
-    location = f"{fake.city()}, {fake.state_abbr()}"
+    if category in ["Groceries", "Utilities", "Charity", "Insurance", "Miscellaneous"]:
+        # 2% chance to generate an anomalous value for lower expense categories
+        if random.random() < anomaly_chance:
+            amount = round(random.uniform(1.0, 5000.0), 2)  # Anomalous range
+        else:
+            amount = round(random.uniform(10.00, 300.00), 2)  # Normal range
+    elif category in ["Dining", "Travel", "Retail", "Healthcare", "Subscriptions", "Education", 
+                    "Automobile", "Entertainment", "Luxury Items", "Financial Services"]:
+        # 2% chance to generate an anomalous value for higher expense categories
+        if random.random() < anomaly_chance:
+            amount = round(random.uniform(1.0, 10000.0), 2)  # Anomalous range
+        else:
+            if category == "Dining":
+                amount = round(random.uniform(50.00, 500.00), 2)
+            elif category == "Travel":
+                amount = round(random.uniform(200.00, 3000.00), 2)
+            elif category == "Retail":
+                amount = round(random.uniform(50.00, 500.00), 2)
+            elif category == "Healthcare":
+                amount = round(random.uniform(100.00, 1500.00), 2)
+            elif category == "Subscriptions":
+                amount = round(random.uniform(10.00, 100.00), 2)
+            elif category == "Education":
+                amount = round(random.uniform(100.00, 2500.00), 2)
+            elif category == "Automobile":
+                amount = round(random.uniform(200.00, 1000.00), 2)
+            elif category == "Entertainment":
+                amount = round(random.uniform(20.00, 300.00), 2)
+            elif category == "Luxury Items":
+                amount = round(random.uniform(100.00, 5000.00), 2)
+            elif category == "Financial Services":
+                amount = round(random.uniform(10.00, 200.00), 2)
+    if random.random() < anomaly_chance:
+        location = f"{fake.city()}, {fake.state_abbr()}" # Less than 2% chance to have a random location (fraud)
+    else:
+        location = find_typical_location(customer_id)  # Use the customer's common location
     card_type = random.choice(card_types)
     approval_status = random.choices(approval_statuses, weights, k=1)[0]
     payment_method = random.choice(payment_methods)
@@ -119,7 +191,7 @@ def generate_charge():
 
     generated_charge = Charge(transaction_id, customer_id, timestamp, merchant_name, category, amount, location, 
                               card_type, approval_status, payment_method, is_fraud)
-
+    
     return generated_charge
 
 # Adds a charge to database, allows for manual charge entry
@@ -384,8 +456,37 @@ def timestamp_check():
         if conn:
             conn.close()
 
+# Helper function to check if a charge's category is within the expected bounds - returns False if not
+def is_amount_valid(charge):
+    category = charge.category
+    amount = charge.amount
+
+    # Category bounds for each category (only considering the max value)
+    category_bounds = {
+        "Groceries": 300.00,
+        "Utilities": 300.00,
+        "Charity": 300.00,
+        "Insurance": 300.00,
+        "Miscellaneous": 300.00,
+        "Dining": 500.00,
+        "Travel": 3000.00,
+        "Retail": 500.00,
+        "Healthcare": 1500.00,
+        "Subscriptions": 100.00,
+        "Education": 2500.00,
+        "Automobile": 1000.00,
+        "Entertainment": 300.00,
+        "Luxury Items": 5000.00,
+        "Financial Services": 200.00
+    }
+    
+    # Check if the amount exceeds the max allowed value
+    if amount > category_bounds[category]:
+        return False
+    
+    return True
+
 # Function that takes a charge and determines fraudulence based on logic and defined rules
-# needs to go through all charges, would be time consuming, should chunk up data, maybe multithread with Pyspark
 def flag_fraud(charge):
     try:
         # Check if is_fraud is marked as Undetermined or NULL value
@@ -395,6 +496,7 @@ def flag_fraud(charge):
                 charge.set_fraud("Fraud")
                 print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to {charge.category} charge over $1000.00")
                 update_transaction(charge)
+                # Return True to indicate that fraud was detected
                 return True
 
             # Flag any charge above 3000 that is not categorized as 'Travel' or 'Luxury Items'
@@ -402,6 +504,7 @@ def flag_fraud(charge):
                 charge.set_fraud("Fraud")
                 print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to [${charge.amount} spent in Category: {charge.category}]")
                 update_transaction(charge)
+                # Return True to indicate that fraud was detected
                 return True
 
             # Calculate Z-Score
@@ -414,6 +517,7 @@ def flag_fraud(charge):
                     print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to outlier in spending."
                             f"Charge Amount: ${charge.amount}, Z-Score: {z_score:.2f}")
                     update_transaction(charge)
+                    # Return True to indicate that fraud was detected
                     return True
 
             # Check for identical charges occur with same customer_id, location, and timestamp
@@ -422,15 +526,34 @@ def flag_fraud(charge):
                 charge.set_fraud("Fraud")
                 print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to duplicate charge. Analysis found {len(duplicates)} identical charges.")
                 update_transaction(charge)
+                # Return True to indicate that fraud was detected
                 return True
             
+            # Check for locational anomalies
+            typical_location = find_typical_location(charge.customer_id)
+            if charge.location not in [typical_location, "Unknown"]:
+                charge.set_fraud("Fraud")
+                print(
+                        f"Transaction ID: {charge.transaction_id} marked as FRAUD due to location anomaly. "
+                        f"Location: {charge.location} does not match typical location: {typical_location}"
+                    )
+                update_transaction(charge)
+                # Return True to indicate that fraud was detected
+                return True
             
+            # Check if a charge's category is within the expected expenditure amount bounds
+            if not is_amount_valid(charge):
+                charge.set_fraud("Fraud")
+                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to Charge Amount: {charge.amount} out of expected bound for Category: {charge.category}")
+                update_transaction(charge)
+                # Return True to indicate that fraud was detected
+                return True
 
-            
             # If none of the above conditions are met, mark as Not Fraud
             charge.set_fraud("Not Fraud")
             print(f"Transaction ID: {charge.transaction_id} marked as NOT FRAUD after analysis.")
             update_transaction(charge)
+            # Return False to indicate that fraud was not detected
             return False
         
         # If is_fraud is already updated
@@ -440,3 +563,4 @@ def flag_fraud(charge):
     except Exception as e:
         print(f"Error processing transaction {charge.transaction_id}: {e}")
         return False
+    
