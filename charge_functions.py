@@ -22,7 +22,8 @@ def database_connect(dbname, user, password, host, port=5432):
 class Charge:
     # Initialize all attributes with empty values to detect and handle improper import from database
     def __init__(self, transaction_id="", customer_id="", timestamp=None, merchant_name="", 
-                category="", amount=0.00, location="", card_type="", approval_status="", payment_method="", is_fraud="Undetermined"):
+                category="", amount=0.00, location="", card_type="", approval_status="", payment_method="", 
+                is_fraud="Undetermined", note=None):
 
         self.transaction_id = transaction_id
         self.customer_id = customer_id
@@ -35,6 +36,7 @@ class Charge:
         self.approval_status = approval_status
         self.payment_method = payment_method
         self.is_fraud = is_fraud
+        self.note = note
         
     def print_info(self):
         print(f"Transaction ID: {self.transaction_id}")
@@ -48,9 +50,13 @@ class Charge:
         print(f"Approval Status: {self.approval_status}")
         print(f"Payment Method: {self.payment_method}")
         print(f"Fraud Satus: {self.is_fraud}")
+        print(f"Transaction Note: {self.note}")
 
     def set_fraud(self, update):
         self.is_fraud = update
+
+    def update_note(self, update):
+        self.note = update
 
 # Updates the table with new transaction information when modified
 def update_transaction(charge):
@@ -63,13 +69,13 @@ def update_transaction(charge):
         update_table_sql = """
                 UPDATE transactions
                 SET customer_id = %s, timestamp = %s, merchant_name = %s, category = %s, amount = %s, 
-                    location = %s, card_type = %s, approval_status = %s, payment_method = %s, is_fraud = %s
+                    location = %s, card_type = %s, approval_status = %s, payment_method = %s, is_fraud = %s, note = %s
                 WHERE transaction_id = %s
                 """
         # Execute the SQL Query
         cur.execute(update_table_sql, (
             charge.customer_id, charge.timestamp, charge.merchant_name, charge.category, charge.amount,
-            charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud,
+            charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud, charge.note,
             charge.transaction_id,
         ))
         
@@ -119,80 +125,35 @@ def find_typical_location(customerID):
         if conn:
             conn.close()
 
-# Function to generate a randomized charge to simulate data from a new charge - returns a Charge
-def generate_charge():
-    # Initialize Faker instance for generating realistic data
-    fake = Faker()
+# Helper function to find a transaction in database from transaction ID
+def find_charge(transactionID):
+    try:
+        # Connect to PostgreSQL database using the helper function
+        conn = database_connect(**DATABASE_CONFIG)
+        cur = conn.cursor()
 
-    # Define list of expenditure categories
-    categories = [
-    "Groceries", "Dining", "Travel", "Retail", "Utilities", "Healthcare",
-    "Subscriptions", "Education", "Automobile", "Entertainment", "Charity",
-    "Insurance", "Miscellaneous", "Financial Services", "Luxury Items"
-    ]
-    # Define list of card types
-    card_types = ["Visa", "Mastercard", "American Express", "Discover"]
-    # Define list of approval statuses
-    approval_statuses = ["Approved", "Declined", "Pending"]
-    weights = [75, 10, 15]  # Corresponding to 75%, 10%, and 15%
-    # Define list of payment methods
-    payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
-    uuid_list = [str(uuid.uuid4())[:8] for _ in range(4000)] # list of 4000 customer_id's
+        # Check if the transaction_id exists
+        check_sql = "SELECT * FROM transactions WHERE transaction_id = %s"
+        cur.execute(check_sql, (transactionID,))
+        result = cur.fetchall()
 
-    # Probability of anomaly (used for location and amount)
-    anomaly_chance = 0.02  # 2%
-
-    # Generate simulated charge information
-    transaction_id = str(uuid.uuid4()).replace('-', '')[:10]
-    customer_id = random.choice(uuid_list)
-    timestamp = fake.date_time_this_decade()
-    merchant_name = fake.company()
-    category = random.choice(categories)
-    if category in ["Groceries", "Utilities", "Charity", "Insurance", "Miscellaneous"]:
-        # 2% chance to generate an anomalous value for lower expense categories
-        if random.random() < anomaly_chance:
-            amount = round(random.uniform(1.0, 5000.0), 2)  # Anomalous range
+        # Return the result if found, otherwise return None
+        if result:
+            return result
         else:
-            amount = round(random.uniform(10.00, 300.00), 2)  # Normal range
-    elif category in ["Dining", "Travel", "Retail", "Healthcare", "Subscriptions", "Education", 
-                    "Automobile", "Entertainment", "Luxury Items", "Financial Services"]:
-        # 2% chance to generate an anomalous value for higher expense categories
-        if random.random() < anomaly_chance:
-            amount = round(random.uniform(1.0, 10000.0), 2)  # Anomalous range
-        else:
-            if category == "Dining":
-                amount = round(random.uniform(50.00, 500.00), 2)
-            elif category == "Travel":
-                amount = round(random.uniform(200.00, 3000.00), 2)
-            elif category == "Retail":
-                amount = round(random.uniform(50.00, 500.00), 2)
-            elif category == "Healthcare":
-                amount = round(random.uniform(100.00, 1500.00), 2)
-            elif category == "Subscriptions":
-                amount = round(random.uniform(10.00, 100.00), 2)
-            elif category == "Education":
-                amount = round(random.uniform(100.00, 2500.00), 2)
-            elif category == "Automobile":
-                amount = round(random.uniform(200.00, 1000.00), 2)
-            elif category == "Entertainment":
-                amount = round(random.uniform(20.00, 300.00), 2)
-            elif category == "Luxury Items":
-                amount = round(random.uniform(100.00, 5000.00), 2)
-            elif category == "Financial Services":
-                amount = round(random.uniform(10.00, 200.00), 2)
-    if random.random() < anomaly_chance:
-        location = f"{fake.city()}, {fake.state_abbr()}" # Less than 2% chance to have a random location (fraud)
-    else:
-        location = find_typical_location(customer_id)  # Use the customer's common location
-    card_type = random.choice(card_types)
-    approval_status = random.choices(approval_statuses, weights, k=1)[0]
-    payment_method = random.choice(payment_methods)
-    is_fraud = "Undetermined"
+            print(f"Transaction ID: {transactionID} is not in the database.")
+            return None
 
-    generated_charge = Charge(transaction_id, customer_id, timestamp, merchant_name, category, amount, location, 
-                              card_type, approval_status, payment_method, is_fraud)
-    
-    return generated_charge
+    except Exception as e:
+        print(f"Error finding transaction: {e}")
+        raise  # Re-raise the exception for better error propagation
+
+    finally:
+        # Ensure the cursor and connection are closed
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 # Adds a charge to database, allows for manual charge entry
 def add_charge(charge):
@@ -213,16 +174,16 @@ def add_charge(charge):
             insert_sql = """
                 INSERT INTO transactions (
                     transaction_id, customer_id, timestamp, merchant_name, category, amount, 
-                    location, card_type, approval_status, payment_method, is_fraud
+                    location, card_type, approval_status, payment_method, is_fraud, note
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             # Execute the SQL Query
             cur.execute(insert_sql, (
                 charge.transaction_id, charge.customer_id, charge.timestamp, 
                 charge.merchant_name, charge.category, charge.amount, 
                 charge.location, charge.card_type, charge.approval_status, 
-                charge.payment_method, charge.is_fraud,
+                charge.payment_method, charge.is_fraud, charge.note,
             ))
             # Commit the addition
             conn.commit()
@@ -274,6 +235,117 @@ def delete_charge(transactionID):
             cur.close()
         if conn:
             conn.close()
+
+# Function to generate a randomized charge to simulate data from a new charge - returns a Charge
+def generate_charge():
+    # Initialize Faker instance for generating realistic data
+    fake = Faker()
+
+    # Define list of expenditure categories
+    categories = [
+    "Groceries", "Dining", "Travel", "Retail", "Utilities", "Healthcare",
+    "Subscriptions", "Education", "Automobile", "Entertainment", "Charity",
+    "Insurance", "Miscellaneous", "Financial Services", "Luxury Items"
+    ]
+    # Define list of card types
+    card_types = ["Visa", "Mastercard", "American Express", "Discover"]
+    # Define list of approval statuses
+    approval_statuses = ["Approved", "Declined", "Pending"]
+    weights = [75, 10, 15]  # Corresponding to 75%, 10%, and 15%
+    # Define list of payment methods
+    payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
+    declined_notes = ["Insufficient Balance", "Expired Card", "Incorrect CVV", "Card Not Activated", 
+                  "Invalid Card Number", "Suspended Card", "Do Not Honor", "Exceeded Credit Limit"]
+    uuid_list = [str(uuid.uuid4())[:8] for _ in range(4000)] # list of 4000 customer_id's
+
+    # Probability of anomaly (used for location and amount)
+    anomaly_chance = 0.02  # 2%
+
+    # Helper function to generate a unique transaction ID
+    def generate_unique_transaction_id():
+        try:
+            # Connect to the database once
+            conn = database_connect(**DATABASE_CONFIG)
+            cur = conn.cursor()
+
+            while True:
+                # Generate a new transaction ID
+                transaction_id = str(uuid.uuid4()).replace('-', '')
+
+                # Check if the transaction_id exists
+                check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
+                cur.execute(check_sql, (transaction_id,))
+                result = cur.fetchone()
+
+                if not result:  # If no match found
+                    return transaction_id  # Unique ID found, return it
+
+        except Exception as e:
+            print(f"Error generating transaction ID: {e}")
+            raise
+
+        finally:
+            # Ensure the cursor and connection are closed
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+
+    # Generate simulated charge information
+    transaction_id = generate_unique_transaction_id()
+    customer_id = random.choice(uuid_list)
+    timestamp = fake.date_time_this_decade()
+    merchant_name = fake.company()
+    category = random.choice(categories)
+    if category in ["Groceries", "Utilities", "Charity", "Insurance", "Miscellaneous"]:
+        # 2% chance to generate an anomalous value for lower expense categories
+        if random.random() < anomaly_chance:
+            amount = round(random.uniform(1.0, 5000.0), 2)  # Anomalous range
+        else:
+            amount = round(random.uniform(10.00, 300.00), 2)  # Normal range
+    elif category in ["Dining", "Travel", "Retail", "Healthcare", "Subscriptions", "Education", 
+                    "Automobile", "Entertainment", "Luxury Items", "Financial Services"]:
+        # 2% chance to generate an anomalous value for higher expense categories
+        if random.random() < anomaly_chance:
+            amount = round(random.uniform(1.0, 10000.0), 2)  # Anomalous range
+        else:
+            if category == "Dining":
+                amount = round(random.uniform(50.00, 500.00), 2)
+            elif category == "Travel":
+                amount = round(random.uniform(200.00, 3000.00), 2)
+            elif category == "Retail":
+                amount = round(random.uniform(50.00, 500.00), 2)
+            elif category == "Healthcare":
+                amount = round(random.uniform(100.00, 1500.00), 2)
+            elif category == "Subscriptions":
+                amount = round(random.uniform(10.00, 100.00), 2)
+            elif category == "Education":
+                amount = round(random.uniform(100.00, 2500.00), 2)
+            elif category == "Automobile":
+                amount = round(random.uniform(200.00, 1000.00), 2)
+            elif category == "Entertainment":
+                amount = round(random.uniform(20.00, 300.00), 2)
+            elif category == "Luxury Items":
+                amount = round(random.uniform(100.00, 5000.00), 2)
+            elif category == "Financial Services":
+                amount = round(random.uniform(10.00, 200.00), 2)
+    if random.random() < anomaly_chance:
+        location = f"{fake.city()}, {fake.state_abbr()}" # Less than 2% chance to have a random location (fraud)
+    else:
+        location = find_typical_location(customer_id)  # Use the customer's common location
+    card_type = random.choice(card_types)
+    approval_status = random.choices(approval_statuses, weights, k=1)[0]
+    payment_method = random.choice(payment_methods)
+    is_fraud = "Undetermined"
+    if approval_status == "Declined":
+        note = random.choice(declined_notes)
+    else:
+        note = None 
+
+    generated_charge = Charge(transaction_id, customer_id, timestamp, merchant_name, category, amount, location, 
+                              card_type, approval_status, payment_method, is_fraud, note)
+    
+    return generated_charge
 
 # Simulates a new charge being added to database, as if a payment was processed
 def swipe_card():
@@ -564,3 +636,34 @@ def flag_fraud(charge):
         print(f"Error processing transaction {charge.transaction_id}: {e}")
         return False
     
+# Notifies customer of 'declined' charge status note
+def notify_customer(charge):
+
+    # Connect to PostgreSQL Database using the helper function
+    conn = database_connect(**DATABASE_CONFIG)
+    cur = conn.cursor()  # Cursor to execute SQL commands
+    try:
+        # SQL query to find declined charges for the given customer_id
+        find_charge_sql = """
+                          SELECT *
+                          FROM transactions
+                          WHERE approval_status = 'Declined' AND customer_id = %s
+                          """
+        # Execute the SQL query with customer_id
+        cur.execute(find_charge_sql, (charge.customer_id,))
+        declined_charges = cur.fetchall()
+
+        # If there are declined charges, print notifications for each
+        for declined in declined_charges:
+            transaction_id = declined[0]
+            print(f"Transaction: {transaction_id} Declined. Transaction Note: {charge.note}")
+
+    except Exception as e:
+        print(f"Error retrieving declined charges for customer_id {charge.customer_id}: {e}")
+
+    finally:
+        # Ensure the cursor and connection are closed properly
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()

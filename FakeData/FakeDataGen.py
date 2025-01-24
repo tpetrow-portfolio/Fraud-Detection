@@ -12,7 +12,6 @@ customer_locations = {}
 # Probability of anomaly (used for location and amount)
 anomaly_chance = 0.02  # 2%
 
-
 # Define parameters for dataset creation
 num_transactions = 10000000 # Adjust this number to control the dataset size
 categories = [
@@ -24,7 +23,8 @@ card_types = ["Visa", "Mastercard", "American Express", "Discover"]
 approval_statuses = ["Approved", "Declined", "Pending"]
 weights = [75, 10, 15]  # Corresponding to 75%, 10%, and 15%
 payment_methods = ["Chip", "Swipe", "Contactless", "Online Payment", "Mobile Wallet"]
-
+declined_notes = ["Insufficient Balance", "Expired Card", "Incorrect CVV", "Card Not Activated", 
+                  "Invalid Card Number", "Suspended Card", "Do Not Honor", "Exceeded Credit Limit"]
 uuid_list = [str(uuid.uuid4())[:8] for _ in range(4000)] # list of 4000 customer_id's
 
 last_charge = []
@@ -33,7 +33,7 @@ last_charge = []
 def generate_transaction():
     global last_charge, customer_locations
         
-    transaction_id = str(uuid.uuid4()).replace('-', '')[:10]
+    transaction_id = str(uuid.uuid4()).replace('-', '')
     customer_id = random.choice(uuid_list)
     timestamp = fake.date_time_this_decade().strftime('%Y-%m-%d %H:%M:%S')
     merchant_name = fake.company()
@@ -83,6 +83,11 @@ def generate_transaction():
     approval_status = random.choices(approval_statuses, weights, k=1)[0]
     payment_method = random.choice(payment_methods)
     is_fraud = "Undetermined"
+    # Set a random status note for Declined transactions
+    if approval_status == "Declined":
+        note = random.choice(declined_notes)
+    else:
+        note = None 
 
     # Introduce anomalies to simulate potential fraud
     if random.random() < 0.03:  # ~3% chance of being fraudulent
@@ -134,9 +139,11 @@ def generate_transaction():
                 card_type = last_charge[7]
                 approval_status = last_charge[8]
                 payment_method = last_charge[9]
+                is_fraud = last_charge[10]
+                note = last_charge[11]
     
     # Update last_charge with the most recent transaction data
-    last_charge = [transaction_id, customer_id, timestamp, merchant_name, category, amount, location, card_type, approval_status, payment_method, is_fraud]
+    last_charge = [transaction_id, customer_id, timestamp, merchant_name, category, amount, location, card_type, approval_status, payment_method, is_fraud, note]
 
 
     return {
@@ -150,7 +157,8 @@ def generate_transaction():
         "Card Type": card_type,
         "Approval Status": approval_status,
         "Payment Method": payment_method,
-        "Is Fraud": is_fraud
+        "Is Fraud": is_fraud,
+        "Note": note
     }
 
 # Generate dataset
