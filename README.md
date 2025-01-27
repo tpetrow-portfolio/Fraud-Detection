@@ -68,9 +68,9 @@ Fraud-Detection/
    - Update the `DATABASE_CONFIG` in `confg.py` with your PostgreSQL credentials, and info
 
 3. **Run the Application**
-```bash
-   python data_processing.py
-```
+    ```bash
+       python data_processing.py
+    ```
 
 ## Usage
 
