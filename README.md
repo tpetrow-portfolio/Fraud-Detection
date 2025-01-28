@@ -23,7 +23,7 @@ Card Guard is a comprehensive fraud detection application designed to identify s
   - Locational profiling to identify typical spending regions.
 
 - **Integration with PostgreSQL**:
-  - Efficient handling of large datasets using `Dask` for parallelized processing.
+  - Efficient handling of large datasets using Apache Spark for parallelized processing.
   - Data loading and storage using SQLAlchemy.
 
 - **Testing Framework**:
@@ -33,7 +33,7 @@ Card Guard is a comprehensive fraud detection application designed to identify s
 
 - **Backend**: Python
 - **Database**: PostgreSQL
-- **Data Processing**: Dask, Pandas, SQLAlchemy
+- **Data Processing**: Apache Spark, Pandas, SQLAlchemy
 - **Libraries**: 
   - `psycopg2` for database connectivity.
   - `pytest` and `unittest.mock` for testing.
@@ -45,7 +45,7 @@ Card Guard is a comprehensive fraud detection application designed to identify s
 Fraud-Detection/
 │
 ├── charge_functions.py          # Core transaction logic and fraud detection rules
-├── data_processing.py           # Parallel data loading and analysis using Dask
+├── data_processing.py           # Parallel data loading and analysis using Apache Spark
 ├── test_charge_functions.py     # Unit tests for key functionalities
 ├── config.py                    # Database configuration settings
 ├── README.md                    # Project documentation
