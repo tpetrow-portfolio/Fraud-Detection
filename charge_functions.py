@@ -3,13 +3,14 @@
 
 # Import libraries
 import psycopg2
-from config import DATABASE_CONFIG
+from config import DATABASE_CONFIG, DATABASE_TABLE
 import random
 from datetime import datetime
 import uuid
 from faker import Faker
 
-# Helper function that establishes a connection to the PostgreSQL database
+## DATABASE CONNECTION FUNCTIONS
+    # Helper function that establishes a connection to the PostgreSQL database
 def database_connect(dbname, user, password, host, port=5432):
     try:
         conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
@@ -17,6 +18,36 @@ def database_connect(dbname, user, password, host, port=5432):
     except psycopg2.Error as e:
         print(f"Error connecting to the database: {e}")
         raise
+
+    # Helper function that closes a connection to the PostgreSQL database
+def database_close(connection, cursor):
+    try:
+        # Commit any changes before closing
+        if connection:
+            connection.commit()  # Only necessary if you’ve made changes to the database
+        if cursor:
+            cursor.close()
+    except Exception as e:
+        print(f"Error closing cursor/connection: {e}")
+    finally:
+        if connection:
+            connection.close()
+
+# Connect to PostgreSQL Database using the helper function
+main_connection = database_connect(**DATABASE_CONFIG)  # Database connection passed into functions
+main_cursor = main_connection.cursor()  # Cursor to execute SQL commands - passed into functions
+
+
+# Cosmetic function to allow certain text to be highlighted in console
+def highlight(color="blue", string=""):
+    if color == "blue":
+        return f"\033[1;36m{string}\033[0m"  # Highlight text Blue
+    elif color == "red":
+        return f"\033[1;31m{string}\033[0m"  # Highlight text Red
+    elif color == "green":
+        return f"\033[1;32m{string}\033[0m"  # Highlight text Green
+    else:
+        return f"\033[1;36m{string}\033[0m"  # Default to blue if invalid color
 
 # Define 'Charge' class with all attributes of a charge from the database
 class Charge:
@@ -35,22 +66,28 @@ class Charge:
         self.card_type = card_type
         self.approval_status = approval_status
         self.payment_method = payment_method
-        self.is_fraud = is_fraud
+        self.is_fraud = is_fraud if is_fraud is not None else "Undetermined"
         self.note = note
         
     def print_info(self):
-        print(f"Transaction ID: {self.transaction_id}")
-        print(f"Customer ID: {self.customer_id}")
-        print(f"Timestamp: {self.timestamp}")
-        print(f"Merchant Name: {self.merchant_name}")
-        print(f"Category: {self.category}")
-        print(f"Amount: ${self.amount:.2f}")
-        print(f"Location: {self.location}")
-        print(f"Card Type: {self.card_type}")
-        print(f"Approval Status: {self.approval_status}")
-        print(f"Payment Method: {self.payment_method}")
-        print(f"Fraud Satus: {self.is_fraud}")
-        print(f"Transaction Note: {self.note}")
+        print("--------------------------------------------------")
+        print(f"Transaction ID: {highlight("blue",self.transaction_id)}")
+        print(f"Customer ID: {highlight("blue",self.customer_id)}")
+        print(f"Timestamp: {highlight("blue",self.timestamp)}")
+        print(f"Merchant Name: {highlight("blue",self.merchant_name)}")
+        print(f"Category: {highlight("blue",self.category)}")
+        print(f"Amount: {highlight("blue",f'${self.amount:.2f}')}")
+        print(f"Location: {highlight("blue",self.location)}")
+        print(f"Card Type: {highlight("blue",self.card_type)}")
+        print(f"Approval Status: {highlight("blue",self.approval_status)}")
+        print(f"Payment Method: {highlight("blue",self.payment_method)}")
+        if self.is_fraud == "FRAUD":
+            print(f"Fraud Satus: {highlight("red",self.is_fraud)}") # Print FRAUD in red
+        elif self.is_fraud == "NOT FRAUD":
+            print(f"Fraud Satus: {highlight("green",self.is_fraud)}") # Print NOT FRAUD in green
+        else:
+            print(f"Fraud Satus: {highlight("blue",self.is_fraud)}") # Print fraud status in default color
+        print(f"Transaction Note: {highlight("blue",self.note)}")
 
     def set_fraud(self, update):
         self.is_fraud = update
@@ -59,55 +96,43 @@ class Charge:
         self.note = update
 
 # Updates the table with new transaction information when modified
-def update_transaction(charge):
-    try:
-        # Connect to PostgreSQL Database using the helper function
-        conn = database_connect(**DATABASE_CONFIG)
-        cur = conn.cursor()  # Cursor to execute SQL commands
-        
+def update_transaction(connection, cursor, charge):
+    try:        
         # SQL query to update row with new transaction information
         update_table_sql = """
-                UPDATE transactions
+                UPDATE {table_name}
                 SET customer_id = %s, timestamp = %s, merchant_name = %s, category = %s, amount = %s, 
                     location = %s, card_type = %s, approval_status = %s, payment_method = %s, is_fraud = %s, note = %s
                 WHERE transaction_id = %s
-                """
+                """.format(table_name=DATABASE_TABLE)
         # Execute the SQL Query
-        cur.execute(update_table_sql, (
+        cursor.execute(update_table_sql, (
             charge.customer_id, charge.timestamp, charge.merchant_name, charge.category, charge.amount,
             charge.location, charge.card_type, charge.approval_status, charge.payment_method, charge.is_fraud, charge.note,
             charge.transaction_id,
         ))
         
         # Commit changes and close connections
-        conn.commit()
-        print(f"Transaction ID {charge.transaction_id} successfully updated.")
+        connection.commit()
+        print(f"Transaction ID: {highlight("blue",charge.transaction_id)} successfully updated.")
     except Exception as e:
-        print(f"Error updating transaction {charge.transaction_id}: {e}")
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+        print(f"Error updating transaction {highlight("blue",charge.transaction_id)}: {e}")
 
 # Finds a customer's most common spending location for detecting locational anomaly fraud
-def find_typical_location(customerID):
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()
+def find_typical_location(cursor, customerID):
     try:
         # Query to find the most common location for the customer
         location_query_sql = """
             SELECT location, COUNT(*) AS frequency
-            FROM transactions
+            FROM {table_name}
             WHERE customer_id = %s
             GROUP BY location
             ORDER BY frequency DESC
             LIMIT 1;
-        """
+        """.format(table_name=DATABASE_TABLE)
         # Execute the SQL Query
-        cur.execute(location_query_sql, (customerID,))
-        result = cur.fetchone()
+        cursor.execute(location_query_sql, (customerID,))
+        result = cursor.fetchone()
 
         # Return the most common location or 'Unknown' if no result is found
         if result:
@@ -118,126 +143,91 @@ def find_typical_location(customerID):
     except Exception as e:
         print(f"Error finding typical location for customer_id {customerID}: {e}")
         return "Unknown"
-    
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
 
 # Helper function to find a transaction in database from transaction ID
-def find_charge(transactionID):
+def find_charge(cursor, transactionID):
     try:
-        # Connect to PostgreSQL database using the helper function
-        conn = database_connect(**DATABASE_CONFIG)
-        cur = conn.cursor()
-
         # Check if the transaction_id exists
-        check_sql = "SELECT * FROM transactions WHERE transaction_id = %s"
-        cur.execute(check_sql, (transactionID,))
-        result = cur.fetchall()
+        check_sql = "SELECT * FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
+        cursor.execute(check_sql, (transactionID,))
+        
+        # Use fetchone to get a single result
+        result = cursor.fetchone()
 
         # Return the result if found, otherwise return None
         if result:
-            return result
+            # Create a Charge object from the tuple result
+            return Charge(*result)  # Unpacks the result tuple into the Charge constructor
         else:
-            print(f"Transaction ID: {transactionID} is not in the database.")
+            print(f"Transaction ID: {highlight("blue",transactionID)} is not in the database.")
             return None
 
     except Exception as e:
         print(f"Error finding transaction: {e}")
         raise  # Re-raise the exception for better error propagation
 
-    finally:
-        # Ensure the cursor and connection are closed
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
 # Adds a charge to database, allows for manual charge entry
-def add_charge(charge):
+def add_charge(cursor, charge):
     try:
-        # Connect to PostgreSQL Database using the helper function
-        conn = database_connect(**DATABASE_CONFIG)
-        cur = conn.cursor()  # Cursor to execute SQL commands
-
         # Check if the transaction_id already exists
-        check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
-        cur.execute(check_sql, (charge.transaction_id,))
-        result = cur.fetchone()
+        check_sql = "SELECT 1 FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
+        cursor.execute(check_sql, (charge.transaction_id,))
+        result = cursor.fetchone()
 
         if result:
-            print(f"Transaction ID: {charge.transaction_id} already exists in the database. Skipping insertion.")
+            print(f"Transaction ID: {highlight('blue', charge.transaction_id)} already exists in the database. Skipping insertion.")
         else:
             # SQL to insert new charge
             insert_sql = """
-                INSERT INTO transactions (
+                INSERT INTO {table_name} (
                     transaction_id, customer_id, timestamp, merchant_name, category, amount, 
                     location, card_type, approval_status, payment_method, is_fraud, note
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
+            """.format(table_name=DATABASE_TABLE)
             # Execute the SQL Query
-            cur.execute(insert_sql, (
+            cursor.execute(insert_sql, (
                 charge.transaction_id, charge.customer_id, charge.timestamp, 
                 charge.merchant_name, charge.category, charge.amount, 
                 charge.location, charge.card_type, charge.approval_status, 
                 charge.payment_method, charge.is_fraud, charge.note,
             ))
             # Commit the addition
-            conn.commit()
-            print(f"Transaction ID: {charge.transaction_id} successfully added to database!")
+            print(f"Transaction ID: {highlight('blue', charge.transaction_id)} successfully added to database!")
 
     except Exception as e:
         print("Failed to insert record into table:", e)
-        if conn:
-            conn.rollback()  # Roll back the transaction in case of an error
-
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+        if main_connection:
+            main_connection.rollback()  # Roll back the transaction in case of an error
     
 # Removes a charge from database, allows for manual charge deletion via provided transactionID
-def delete_charge(transactionID):
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def delete_charge(cursor, transactionID):    
     try:
         # Check if the transaction_id exists
-        check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
-        cur.execute(check_sql, (transactionID,))
-        result = cur.fetchone()
+        check_sql = "SELECT 1 FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
+        cursor.execute(check_sql, (transactionID,))
+        result = cursor.fetchone()
 
         if result:
             # SQL FUNCTION to delete a charge by transaction ID
-            remove_sql = "DELETE FROM transactions WHERE transaction_id = %s"
+            remove_sql = "DELETE FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
             # Execute the SQL Query
-            cur.execute(remove_sql, (transactionID,))
+            cursor.execute(remove_sql, (transactionID,))
         
             # Commit the deletion
-            conn.commit()
-            print(f"Transaction ID: {transactionID} successfully removed from database!")
+            main_connection.commit()
+            print(f"Transaction ID: {highlight("blue",transactionID)} successfully removed from database!")
 
         else:
-            print(f"Transaction ID: {transactionID} is not in the database.")     
+            print(f"Transaction ID: {highlight("blue",transactionID)} is not in the database.")
     
     except Exception as e:
         print(f"Failed to delete record from table: {e}")
-        conn.rollback()  # Roll back the transaction in case of an error
-
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+        main_connection.rollback()  # Roll back the transaction in case of an error
 
 # Function to generate a randomized charge to simulate data from a new charge - returns a Charge
-def generate_charge():
+def generate_charge(cursor):
+
     # Initialize Faker instance for generating realistic data
     fake = Faker()
 
@@ -264,18 +254,14 @@ def generate_charge():
     # Helper function to generate a unique transaction ID
     def generate_unique_transaction_id():
         try:
-            # Connect to the database once
-            conn = database_connect(**DATABASE_CONFIG)
-            cur = conn.cursor()
-
             while True:
                 # Generate a new transaction ID
                 transaction_id = str(uuid.uuid4()).replace('-', '')
 
                 # Check if the transaction_id exists
-                check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
-                cur.execute(check_sql, (transaction_id,))
-                result = cur.fetchone()
+                check_sql = "SELECT 1 FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
+                cursor.execute(check_sql, (transaction_id,))
+                result = cursor.fetchone()
 
                 if not result:  # If no match found
                     return transaction_id  # Unique ID found, return it
@@ -283,13 +269,6 @@ def generate_charge():
         except Exception as e:
             print(f"Error generating transaction ID: {e}")
             raise
-
-        finally:
-            # Ensure the cursor and connection are closed
-            if cur:
-                cur.close()
-            if conn:
-                conn.close()
 
     # Generate simulated charge information
     transaction_id = generate_unique_transaction_id()
@@ -332,7 +311,7 @@ def generate_charge():
     if random.random() < anomaly_chance:
         location = f"{fake.city()}, {fake.state_abbr()}" # Less than 2% chance to have a random location (fraud)
     else:
-        location = find_typical_location(customer_id)  # Use the customer's common location
+        location = find_typical_location(cursor, customer_id)  # Use the customer's common location
     card_type = random.choice(card_types)
     approval_status = random.choices(approval_statuses, weights, k=1)[0]
     payment_method = random.choice(payment_methods)
@@ -350,76 +329,55 @@ def generate_charge():
 # Simulates a new charge being added to database, as if a payment was processed
 def swipe_card():
     # Generate a new random charge
-    newCharge = generate_charge()
+    newCharge = generate_charge(main_cursor)
     # Add charge to database with add_charge function
-    add_charge(newCharge)
+    add_charge(main_cursor, newCharge)
+    return newCharge
 
 # Takes in a charge and finds identical charges
-def find_repeat_charges(charge):
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def find_repeat_charges(cursor, charge):
     try:
         # Check if the transaction_id exists
-        check_sql = "SELECT 1 FROM transactions WHERE transaction_id = %s"
-        cur.execute(check_sql, (charge.transaction_id,))
-        result = cur.fetchone()
+        check_sql = "SELECT 1 FROM {table_name} WHERE transaction_id = %s".format(table_name=DATABASE_TABLE)
+        cursor.execute(check_sql, (charge.transaction_id,))
+        result = cursor.fetchone()
 
         if result:
             # SQL query to find repeat charges
             find_charges_sql = """
                             SELECT *
-                            FROM transactions
+                            FROM {table_name}
                             WHERE customer_id = %s
                                 AND timestamp = %s
                                 AND location = %s
-                            """
+                            """.format(table_name=DATABASE_TABLE)
             # Execute the SQL Query
-            cur.execute(find_charges_sql, (charge.customer_id, charge.timestamp, charge.location,))
-            duplicate_charges = cur.fetchall()
+            cursor.execute(find_charges_sql, (charge.customer_id, charge.timestamp, charge.location,))
+            duplicate_charges = cursor.fetchall()
 
             # Return duplicate charges for further analysis
-            # Close Connection with database
-            conn.close()
-            cur.close()
             return duplicate_charges
 
         else:
-            print(f"Transaction ID: {charge.transaction_id} is not in the database.")
-            # Close Connection with database
-            conn.close()
-            cur.close()
+            print(f"Transaction ID: {highlight("blue",charge.transaction_id)} is not in the database.")
             return []   
     
     except Exception as e:
         print(f"Unable to find transaction: {e}")
-        # Close Connection with database
-        conn.close()
-        cur.close()
         return []
-    
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
 
 # Calculates the average amount of money spent by customer
-def calculate_avg_spent(customerID):
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def calculate_avg_spent(cursor, customerID):
     try:
         # Query to calculate the average spending amount
         avg_query_sql = """
                         SELECT AVG(amount) AS avg_amount
-                        FROM transactions
+                        FROM {table_name}
                         WHERE customer_id = %s
-                        """
+                        """.format(table_name=DATABASE_TABLE)
         # Execute the SQL Query
-        cur.execute(avg_query_sql, (customerID,))
-        result = cur.fetchone()
+        cursor.execute(avg_query_sql, (customerID,))
+        result = cursor.fetchone()
 
         # Extract the average amount, handling NULL results from the query
         avg_amount = result[0] if result[0] is not None else 0.0
@@ -429,28 +387,18 @@ def calculate_avg_spent(customerID):
         print(f"Error calculating average for customer_id {customerID}: {e}")
         return 0.0
 
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
 # Takes in a customer_id and finds the average amount of money spent by customer to help with Z-Score
-def calculate_average_and_std_dev(customerID):
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def calculate_average_and_std_dev(cursor, customerID):
     try:
         # Query to calculate both average and standard deviation in one query
         avg_std_query_sql = """
                     SELECT AVG(amount) AS avg_amount, STDDEV_SAMP(amount) AS std_dev
-                    FROM transactions
+                    FROM {table_name}
                     WHERE customer_id = %s
-                    """
+                    """.format(table_name=DATABASE_TABLE)
         # Execute the SQL Query
-        cur.execute(avg_std_query_sql, (customerID,))
-        result = cur.fetchone()
+        cursor.execute(avg_std_query_sql, (customerID,))
+        result = cursor.fetchone()
 
         # Handle cases where the result might be None
         if result:
@@ -464,76 +412,59 @@ def calculate_average_and_std_dev(customerID):
         print(f"Error calculating average and standard deviation for customer_id {customerID}: {e}")
         return 0.0, 0.0
 
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
 # Checks datetime of each charge for NULL or placeholder value and asks user to update value
-def timestamp_check():
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def timestamp_check(cursor):
     try:
         # SQL query to find transactions with placeholder or NULL values
         find_null_timestamps = """
                                 SELECT * 
-                                FROM transactions 
+                                FROM {table_name}
                                 WHERE timestamp IS NULL OR timestamp = '1970-01-01'
-                                """
+                                """.format(table_name=DATABASE_TABLE)
         # Execute the SQL Query
-        cur.execute(find_null_timestamps)
-        missing_timestamps = cur.fetchall()
+        cursor.execute(find_null_timestamps)
+        missing_timestamps = cursor.fetchall()
 
         # If there are missing timestamps, prompt user to update
         if missing_timestamps:
             print(f"Transactions found with NULL or placeholder timestamps.")
             for transaction in missing_timestamps:
                 transaction_id = transaction[0]
-                print(f"Transaction ID {transaction_id} has a missing timestamp.")
-                user_input = input(f"Please enter a valid timestamp for Transaction ID {transaction_id}: ")
+                print(f"Transaction ID: {highlight("blue",transaction_id)} has a missing timestamp.")
+                user_input = input(f"Please enter a valid timestamp for Transaction ID: {highlight("blue",transaction_id)}: ")
                 if user_input:
                     try:
                         new_timestamp = datetime.strptime(user_input, '%Y-%m-%d %H:%M:%S')
                         # Update the transaction's timestamp in the database
                         update_sql = """
-                            UPDATE transactions
+                            UPDATE {table_name}
                             SET timestamp = %s
                             WHERE transaction_id = %s
-                            """
+                            """.format(table_name=DATABASE_TABLE)
                         # Execute the SQL Query
-                        cur.execute(update_sql, (new_timestamp, transaction_id,))
+                        cursor.execute(update_sql, (new_timestamp, transaction_id,))
 
                         # Commit the transaction
-                        conn.commit()
-                        print(f"Transaction ID {transaction_id} updated successfully.")
+                        main_connection.commit()
+                        print(f"Transaction ID: {highlight("blue",transaction_id)} updated successfully.")
                     except ValueError:
                         print("Invalid date format. Please use 'YYYY-MM-DD HH:MM:SS'.")
                 else:
-                    print(f"No input received for Transaction ID {transaction_id}. Skipping update.")
+                    print(f"No input received for Transaction ID: {highlight("blue",transaction_id)}. Skipping update.")
 
         else:
             print("No transactions found with missing timestamps.")
                     
     except Exception as e:
         print(f"Error updating transactions: {e}")
-        conn.rollback()  # Roll back in case of an error
-
-    finally:
-        # Close the cursor and connection
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+        main_connection.rollback()  # Roll back in case of an error
 
 # Helper function to check if a charge's category is within the expected bounds - returns False if not
 def is_amount_valid(charge):
     category = charge.category
     amount = charge.amount
 
-    # Category bounds for each category (only considering the max value)
+    # Category bounds for each category (including "Other")
     category_bounds = {
         "Groceries": 300.00,
         "Utilities": 300.00,
@@ -549,121 +480,93 @@ def is_amount_valid(charge):
         "Automobile": 1000.00,
         "Entertainment": 300.00,
         "Luxury Items": 5000.00,
-        "Financial Services": 200.00
+        "Financial Services": 200.00,
+        "Other": 500.00  # Max value for unexpected categories
     }
+
+    # Use "Other" as a fallback for any unexpected category
+    max_allowed = category_bounds.get(category, category_bounds["Other"])
     
-    # Check if the amount exceeds the max allowed value
-    if amount > category_bounds[category]:
-        return False
-    
-    return True
+    # If amount is less than or equal to max_allowed, return True
+    return amount <= max_allowed
 
 # Function that takes a charge and determines fraudulence based on logic and defined rules
-def flag_fraud(charge):
+def flag_fraud(cursor, charge):
     try:
+        reasons = []  # Collect fraud reasons here
+
         # Check if is_fraud is marked as Undetermined or NULL value
         if charge.is_fraud in ("Undetermined", None):
-            # Flag any charge categorized as 'Financial Services' over $1000
+
+            # Check for various fraud conditions
             if charge.category == "Financial Services" and charge.amount > 1000.00:
-                charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to {charge.category} charge over $1000.00")
-                update_transaction(charge)
-                # Return True to indicate that fraud was detected
-                return True
+                reasons.append(f"{highlight("blue",charge.category)} charge over $1000.00")
 
-            # Flag any charge above 3000 that is not categorized as 'Travel' or 'Luxury Items'
             if charge.amount > 3000.00 and charge.category not in ["Travel", "Luxury Items"]:
-                charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to [${charge.amount} spent in Category: {charge.category}]")
-                update_transaction(charge)
-                # Return True to indicate that fraud was detected
-                return True
+                reasons.append(f"${charge.amount} spent in Category: {highlight("blue",charge.category)}")
 
-            # Calculate Z-Score
-            avg_spent, std_dev = calculate_average_and_std_dev(charge.customer_id)
+            avg_spent, std_dev = calculate_average_and_std_dev(cursor, charge.customer_id)
             if std_dev > 0:  # Avoid division by zero
                 z_score = (charge.amount - avg_spent) / std_dev
-                # Flag outliers in customer spending (Z-Score > 2)
                 if abs(z_score) > 2.0:
-                    charge.set_fraud("Fraud")
-                    print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to outlier in spending."
-                            f"Charge Amount: ${charge.amount}, Z-Score: {z_score:.2f}")
-                    update_transaction(charge)
-                    # Return True to indicate that fraud was detected
-                    return True
+                    reasons.append(f"Outlier in spending: Amount ${highlight("blue",charge.amount)}, Z-Score: {z_score:.2f}")
 
-            # Check for identical charges occur with same customer_id, location, and timestamp
-            duplicates = find_repeat_charges(charge)
-            if len(duplicates) > 1:  # More than one charge with the same attributes
-                charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to duplicate charge. Analysis found {len(duplicates)} identical charges.")
-                update_transaction(charge)
-                # Return True to indicate that fraud was detected
-                return True
-            
-            # Check for locational anomalies
-            typical_location = find_typical_location(charge.customer_id)
+            duplicates = find_repeat_charges(cursor, charge)
+            if len(duplicates) > 1:
+                reasons.append(f"Duplicate charge. Found {highlight("blue",len(duplicates))} identical charges")
+
+            typical_location = find_typical_location(cursor, charge.customer_id)
             if charge.location not in [typical_location, "Unknown"]:
-                charge.set_fraud("Fraud")
-                print(
-                        f"Transaction ID: {charge.transaction_id} marked as FRAUD due to location anomaly. "
-                        f"Location: {charge.location} does not match typical location: {typical_location}"
-                    )
-                update_transaction(charge)
-                # Return True to indicate that fraud was detected
-                return True
-            
-            # Check if a charge's category is within the expected expenditure amount bounds
+                reasons.append(f"Location anomaly: {highlight("blue",charge.location)} (Expected: {typical_location})")
+
             if not is_amount_valid(charge):
-                charge.set_fraud("Fraud")
-                print(f"Transaction ID: {charge.transaction_id} marked as FRAUD due to Charge Amount: {charge.amount} out of expected bound for Category: {charge.category}")
-                update_transaction(charge)
-                # Return True to indicate that fraud was detected
+                reasons.append(f"Charge Amount: ${charge.amount} out of bounds for Category: {highlight("blue",charge.category)}")
+
+            # Set fraud status if any reasons were found
+            if reasons:
+                charge.set_fraud("FRAUD")
+                update_transaction(main_connection, cursor, charge)
+                print(f"Transaction ID: {highlight("blue",charge.transaction_id)} marked as {highlight("red",charge.is_fraud)} due to the following reasons:")
+                for reason in reasons:
+                    print(f"- {reason}")
                 return True
 
-            # If none of the above conditions are met, mark as Not Fraud
-            charge.set_fraud("Not Fraud")
-            print(f"Transaction ID: {charge.transaction_id} marked as NOT FRAUD after analysis.")
-            update_transaction(charge)
-            # Return False to indicate that fraud was not detected
+            # If no fraud reasons, mark as Not Fraud
+            charge.set_fraud("NOT FRAUD")
+            print(f"Transaction ID: {highlight("blue",charge.transaction_id)} marked as {highlight("green",charge.is_fraud)} after analysis.")
+            update_transaction(main_connection, cursor, charge)
             return False
-        
-        # If is_fraud is already updated
+
         else:
-            print(f"Transaction ID: {charge.transaction_id} is already set to {charge.is_fraud}")
+            print(f"Transaction ID: {highlight("blue",charge.transaction_id)} is already set to {highlight("blue",charge.is_fraud)}")
 
     except Exception as e:
-        print(f"Error processing transaction {charge.transaction_id}: {e}")
-        return False
+        print(f"Error processing transaction: {e}")
+        cursor.rollback()
+        return False  # Ensure no further processing
+    
     
 # Notifies customer of 'declined' charge status note
-def notify_customer(charge):
-
-    # Connect to PostgreSQL Database using the helper function
-    conn = database_connect(**DATABASE_CONFIG)
-    cur = conn.cursor()  # Cursor to execute SQL commands
+def notify_customer(cursor, charge):
     try:
         # SQL query to find declined charges for the given customer_id
         find_charge_sql = """
                           SELECT *
-                          FROM transactions
+                          FROM {table_name}
                           WHERE approval_status = 'Declined' AND customer_id = %s
-                          """
+                          """.format(table_name=DATABASE_TABLE)
         # Execute the SQL query with customer_id
-        cur.execute(find_charge_sql, (charge.customer_id,))
-        declined_charges = cur.fetchall()
+        cursor.execute(find_charge_sql, (DATABASE_TABLE,charge.customer_id,))
+        declined_charges = cursor.fetchall()
 
         # If there are declined charges, print notifications for each
         for declined in declined_charges:
             transaction_id = declined[0]
-            print(f"Transaction: {transaction_id} Declined. Transaction Note: {charge.note}")
+            print(f"Transaction ID: {highlight("blue",transaction_id)} Declined. Transaction Note: {charge.note}")
 
     except Exception as e:
-        print(f"Error retrieving declined charges for customer_id {charge.customer_id}: {e}")
+        print(f"Error retrieving declined charges for Customer ID: {highlight("blue",charge.customer_id)}: {e}")
 
-    finally:
-        # Ensure the cursor and connection are closed properly
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+
+# Close the connection to the PostgreSQL database
+database_close(main_connection, main_cursor)
