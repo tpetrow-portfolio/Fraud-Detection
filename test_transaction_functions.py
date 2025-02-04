@@ -3,7 +3,7 @@
 
 from unittest.mock import patch, MagicMock
 from datetime import datetime
-from charge_functions import *
+from transaction_functions import *
 import pytest
 
 @pytest.fixture
@@ -106,3 +106,86 @@ testCharge2 = Charge("TestTransaction2", "TestCustomer", None, "Test Store", "Te
 #delete_charge("TestTransaction")
 #delete_charge("TestTransaction2")'''
 #timestamp_check()
+
+## TESTING
+
+'''
+# Test outer conditional - If transaction amount is 0 or negative
+testTransaction = swipe_card()
+testTransaction.amount = 0
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test nested conditional - If is_fraud is already set
+testTransaction = swipe_card()
+testTransaction.is_fraud = "FRAUD"
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test second nested conditional - If approval_status is Declined
+testTransaction = swipe_card()
+testTransaction.approval_status = "Declined"
+testTransaction.note = "Invalid Card Number"
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test first fraud flagger - If transaction amount is outside of max bound for the transaction's category
+testTransaction = swipe_card()
+testTransaction.category = "Groceries"
+testTransaction.amount = 700.00
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test second fraud flagger - If the transaction amount is outside of the normal standard deviation, based on Z-Score calculation
+testTransaction = swipe_card()
+testTransaction.category = "Luxury Items"
+testTransaction.amount = 4999.99
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test third fraud flagger - If the transaction is identical to another transaction
+testTransaction = swipe_card()
+testTransaction2 = swipe_card()
+testTransaction3 = swipe_card()
+flag_fraud(main_cursor, testTransaction)
+testTransaction2.customer_id = testTransaction.customer_id
+testTransaction2.location = testTransaction.location
+testTransaction2.merchant_name = testTransaction.merchant_name
+testTransaction2.card_type = testTransaction.card_type
+flag_fraud(main_cursor, testTransaction2)
+testTransaction3.customer_id = testTransaction.customer_id
+testTransaction3.location = testTransaction.location
+testTransaction3.merchant_name = testTransaction.merchant_name
+testTransaction3.card_type = testTransaction.card_type
+flag_fraud(main_cursor, testTransaction3)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+delete_transaction(main_cursor, testTransaction2.transaction_id)
+delete_transaction(main_cursor, testTransaction3.transaction_id)
+'''
+
+'''
+# Test fourth fraud flagger - If the transaction is outside the customer's typical location
+testTransaction = swipe_card()
+testTransaction.location = "Great Britain"
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''
+
+'''
+# Test fifth fraud flagger - If the transaction has an unexpected category for customer's age
+testTransaction = swipe_card()
+testTransaction.customer_id = "951cfea37" # A 19 year old customer
+testTransaction.category = "Bar Service"
+flag_fraud(main_cursor, testTransaction)
+delete_transaction(main_cursor, testTransaction.transaction_id)
+'''

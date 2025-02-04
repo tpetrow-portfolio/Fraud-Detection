@@ -9,4 +9,5 @@ DATABASE_CONFIG = {
     "port": 5432,
 }
 
-DATABASE_TABLE = "transactions"
+TRANSACTIONS_TABLE = "transactions"
+CUSTOMERS_TABLE = "customers"
