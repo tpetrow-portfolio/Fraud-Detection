@@ -44,6 +44,7 @@ class Transaction:
         else:
             print(f"Fraud Satus: {highlight("blue",self.is_fraud)}") # Print fraud status in default color
         print(f"Transaction Note: {highlight("blue",self.note)}")
+        print("--------------------------------------------------")
 
     def set_fraud(self, update):
         self.is_fraud = update
@@ -63,10 +64,11 @@ class Customer:
         self.location = location
         self.phone_number = phone_number
     
-        def print_info(self):
-            print("--------------------------------------------------")
-            print(f"Customer ID: {highlight("blue",self.customer_id)}")
-            print(f"Name: {highlight("blue",self.last_name)}, {highlight("blue",self.first_name)}")
-            print(f"Age: {highlight("blue",self.age)}")
-            print(f"Location: {highlight("blue",self.location)}")
-            print(f"Phone Number: {highlight("blue",self.phone_number)}")
+    def print_info(self):
+        print("--------------------------------------------------")
+        print(f"Customer ID: {highlight("blue",self.customer_id)}")
+        print(f"Name: {highlight("blue",self.last_name)}, {highlight("blue",self.first_name)}")
+        print(f"Age: {highlight("blue",self.age)}")
+        print(f"Location: {highlight("blue",self.location)}")
+        print(f"Phone Number: {highlight("blue",self.phone_number)}")
+        print("--------------------------------------------------")

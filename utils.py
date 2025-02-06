@@ -2,6 +2,30 @@
 # utils.py houses general utility functions to assist other files
 
 import csv
+import psycopg2
+
+## DATABASE CONNECTION FUNCTIONS
+# Helper function that establishes a connection to the PostgreSQL database
+def database_connect(dbname, user, password, host, port=5432):
+    try:
+        conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+        return conn
+    except psycopg2.Error as e:
+        print(f"Error connecting to the database: {e}")
+        raise
+# Helper function that closes a connection to the PostgreSQL database
+def database_close(connection, cursor):
+    try:
+        # Commit any changes before closing
+        if connection:
+            connection.commit()  # Only necessary if you’ve made changes to the database
+        if cursor:
+            cursor.close()
+    except Exception as e:
+        print(f"Error closing cursor/connection: {e}")
+    finally:
+        if connection:
+            connection.close()
 
 # Cosmetic function to allow certain text to be highlighted in console
 def highlight(color="blue", string=""):

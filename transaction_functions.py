@@ -1,44 +1,20 @@
 # CARD GUARD
-# Data Processing File
+# Transaction Functions
 
 # Import libraries
 from config import *
 from models import *
-from utils import highlight
-import psycopg2
+from utils import *
 import random
 import uuid
 from faker import Faker
-
-## DATABASE CONNECTION FUNCTIONS
-# Helper function that establishes a connection to the PostgreSQL database
-def database_connect(dbname, user, password, host, port=5432):
-    try:
-        conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
-        return conn
-    except psycopg2.Error as e:
-        print(f"Error connecting to the database: {e}")
-        raise
-# Helper function that closes a connection to the PostgreSQL database
-def database_close(connection, cursor):
-    try:
-        # Commit any changes before closing
-        if connection:
-            connection.commit()  # Only necessary if you’ve made changes to the database
-        if cursor:
-            cursor.close()
-    except Exception as e:
-        print(f"Error closing cursor/connection: {e}")
-    finally:
-        if connection:
-            connection.close()
 
 # Connect to PostgreSQL Database using the helper function
 main_connection = database_connect(**DATABASE_CONFIG)  # Database connection passed into functions
 main_cursor = main_connection.cursor()  # Cursor to execute SQL commands passed into functions
 
 # Updates the table with new transaction information when modified
-def update_transaction(connection, cursor, transaction):
+def update_transaction(cursor, transaction):
     try:        
         # SQL query to update row with new transaction information
         update_table_sql = """
@@ -55,7 +31,7 @@ def update_transaction(connection, cursor, transaction):
         ))
         
         # Commit changes and close connections
-        connection.commit()
+        main_connection.commit()
         print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} successfully updated.")
     except Exception as e:
         print(f"Error updating transaction {highlight("blue",transaction.transaction_id)}: {e}")
@@ -155,12 +131,12 @@ def add_transaction(cursor, transaction):
                 transaction.payment_method, transaction.is_fraud, transaction.note,
             ))
             # Commit the addition
+            main_connection.commit()
             print(f"Transaction ID: {highlight('blue', transaction.transaction_id)} successfully added to database!")
 
     except Exception as e:
         print("Failed to insert record into table:", e)
-        if main_connection:
-            main_connection.rollback()  # Roll back the transaction in case of an error
+        main_connection.rollback()  # Roll back the transaction in case of an error
     
 # Removes a transaction from database, allows for manual transaction deletion via provided transactionID
 def delete_transaction(cursor, transactionID):    
@@ -187,9 +163,8 @@ def delete_transaction(cursor, transactionID):
         print(f"Failed to delete record from table: {e}")
         main_connection.rollback()  # Roll back the transaction in case of an error
 
-# Function to generate a randomized transaction to simulate data from a new transaction - returns a Transaction
+# Function to generate a randomized transaction - returns a Transaction
 def generate_transaction(cursor):
-
     # Initialize Faker instance for generating realistic data
     fake = Faker()
 
