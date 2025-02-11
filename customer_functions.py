@@ -43,7 +43,35 @@ def list_of_transactions(cursor, customerID):
 
 # Lists all of the transactions marked as fraud for a given customer_id
 def list_fraud(cursor, customerID):
-    
+    try:
+        # Check if the customer exists in customers table
+        check_sql = "SELECT * FROM {table_name} WHERE customer_id = %s".format(table_name=CUSTOMERS_TABLE)
+        cursor.execute(check_sql, (customerID,))
+        
+        # Use fetchone to get a single result
+        result = cursor.fetchone()
+
+        # If customer exists, find and return a list of their fraudulent transactions from the transactions table
+        if result:
+            get_transactions_sql = """
+                                    SELECT transaction_id 
+                                    FROM {table_name} 
+                                    WHERE customer_id = %s AND is_fraud = 'FRAUD'
+                                    """.format(table_name=TRANSACTIONS_TABLE)
+            cursor.execute(get_transactions_sql, (customerID,))
+            transactions_list = cursor.fetchall()
+            if transactions_list: return transactions_list
+            else: 
+                print(f"Customer ID: {highlight("blue",customerID)} does not have any fraudulent transactions")
+                return []
+        # If customer does not exist, return an empty list
+        else:
+            print(f"Customer ID: {highlight("blue",customerID)} is not in the database.")
+            return []
+        
+    except Exception as e:
+        print(f"Error finding customer: {e}")
+        raise  # Re-raise the exception for better error propagation
 
 # Helper function to find a customer_id in database from customer ID
 def find_customer(cursor, customerID):
