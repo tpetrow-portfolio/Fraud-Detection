@@ -35,6 +35,8 @@ def highlight(color="blue", string=""):
         return f"\033[1;31m{string}\033[0m"  # Highlight text Red
     elif color == "green":
         return f"\033[1;32m{string}\033[0m"  # Highlight text Green
+    elif color == "yellow":
+        return f"\033[1;33m{string}\033[0m"  # Highlight text Yellow
     else:
         return f"\033[1;36m{string}\033[0m"  # Default to blue if invalid color
 

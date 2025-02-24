@@ -5,6 +5,7 @@
 from config import *
 from models import *
 from utils import *
+from customer_functions import find_customer
 import random
 import uuid
 from faker import Faker
@@ -482,13 +483,15 @@ def flag_fraud(cursor, transaction):
                 # Apply fraud detection logic only to transactions that are approved or pending
                 if transaction.approval_status in ["Pending", "Approved"]:
                     reasons = []  # Collect fraud reasons here
+                    fraud_score = 0  # Assignment of a fraud_score based on how many flags are found
 
-                    # FRAUD LOGIC
+                    # FRAUD LOGIC BEGINS
                     # Check for various fraud conditions
 
                     # If the transaction amount is outside the max bound for the transaction category
                     if not is_amount_valid(transaction):
-                        reasons.append(f"Transaction Amount: ${transaction.amount} out of bounds for Category: {highlight("blue",transaction.category)}")
+                        reasons.append(f"Transaction Amount: {highlight('blue', '$')}{highlight('blue', transaction.amount)} out of bounds for Category: {highlight("blue",transaction.category)}")
+                        fraud_score += 1
 
                     # If the transaction amount is outside of the normal standard deviation, based on Z-Score calculation
                     avg_spent, std_dev = calculate_average_and_std_dev(cursor, transaction.customer_id)
@@ -496,36 +499,40 @@ def flag_fraud(cursor, transaction):
                         z_score = (float(transaction.amount) - avg_spent) / std_dev
                         if abs(z_score) > 2.0:
                             reasons.append(f"Outlier in spending: Amount {highlight('blue', '$')}{highlight('blue', transaction.amount)}, Z-Score: {highlight('blue', f'{z_score:.2f}')}")
+                            fraud_score += 1
 
                     # If the transaction is identical to another transaction
                     duplicates = find_repeat_transactions(cursor, transaction)
                     if len(duplicates) > 0: # If it finds one or more duplicate transactions, print all duplicate transaction id's
                         reasons.append(f"Duplicate transaction. Found {highlight('blue', len(duplicates))} identical transaction(s): {highlight('blue', ', '.join([dup[0] for dup in duplicates]))}")
+                        fraud_score += 1
 
                     # If the transaction is outside the customer's common location
                     common_location = find_customer_location(cursor, transaction.customer_id)
                     if transaction.location not in [common_location, "Unknown"]:
                         reasons.append(f"Location anomaly: {highlight("blue",transaction.location)} (Expected: {highlight("blue",common_location)})")
+                        fraud_score += 1
                     
                     # If the transaction has an unexpected category for customer's age
                     customer_age = find_customer_age(cursor, transaction.customer_id)
                     if customer_age < 21 and transaction.category in ["Night Club", "Bar Service", "Gambling", "Car Rental"]:
                         reasons.append(f"Unexpected Category: {highlight("blue",transaction.category)} for customer's age: {highlight("blue",str(customer_age))}")
+                        fraud_score += 1
 
                     # Set fraud status if any reasons were found, and display all flags to user
                     if reasons:
                         transaction.set_fraud("FRAUD")
-                        update_transaction(main_connection, cursor, transaction)
-                        print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} marked as {highlight("red",transaction.is_fraud)} due to the following reasons:")
+                        update_transaction(cursor, transaction)
+                        print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} marked as {highlight("red",transaction.is_fraud)} with a fraud score of: {highlight("yellow",fraud_score)} due to the following reasons:")
                         for reason in reasons:
                             print(f"{highlight("blue","-")} {reason}")
-                        return True
+                        return fraud_score
 
                     # If no fraud reasons, mark as Not Fraud
                     transaction.set_fraud("NOT FRAUD")
-                    print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} marked as {highlight("green",transaction.is_fraud)} after analysis.")
-                    update_transaction(main_connection, cursor, transaction)
-                    return False
+                    print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} marked as {highlight("green",transaction.is_fraud)} with a fraud score of: {highlight("yellow",fraud_score)} after analysis.")
+                    update_transaction(cursor, transaction)
+                    return 0
                 else:
                     print(f"Transaction ID: {highlight("blue",transaction.transaction_id)} will not be processed. Transaction was marked as {highlight("blue","Declined")}. Declination Note: {highlight("blue",transaction.note)}")
             else:
@@ -540,6 +547,176 @@ def flag_fraud(cursor, transaction):
         print(f"Error processing transaction: {e}")
         main_connection.rollback()
         return False  # Ensure no further processing
+
+
+
+# TESTING FRAUD FLAGS
+
+# TEST 1: Amount = 0
+'''
+print(" ")
+print("----------TEST 1----------")
+print("  Transaction amount = 0")
+print(" ")
+testCharge = swipe_card()
+testCharge.amount = 0
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 2: is_fraud already set
+'''
+print(" ")
+print("----------TEST 2----------")
+print("  is_fraud already set")
+print(" ")
+testCharge = swipe_card()
+testCharge.is_fraud = "FRAUD"
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 3: approval_status = Declined
+'''
+print(" ")
+print("----------TEST 3----------")
+print("  approval_status is \'Declined\'")
+print(" ")
+testCharge = swipe_card()
+testCharge.approval_status = "Declined"
+testCharge.note = "Invalid Card Number"
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 4: Amount out of expected categorical bounds
+'''
+print(" ")
+print("----------TEST 4----------")
+print("  Transaction amount out of expected categorical bounds")
+print(" ")
+testCharge = swipe_card()
+testCharge.approval_status = "Approved"
+testCharge.category = "Groceries"
+testCharge.amount = 700.00
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 5: Amount out of the ordinary for customer (Z-score > 2)
+'''
+print(" ")
+print("----------TEST 5----------")
+print("  Amount out of the ordinary for customer (Z-score > 2)")
+print(" ")
+testCharge = swipe_card()
+testCharge.approval_status = "Approved"
+testCharge.category = "Luxury Items"
+testCharge.amount = 4999.99
+avg_spent, std_dev = calculate_average_and_std_dev(main_cursor,testCharge.customer_id)
+z_score = abs((testCharge.amount - avg_spent)/std_dev)
+print(f"Average Spent: {avg_spent}. Standard Deviation: {std_dev}. Z-Score of transaction: {z_score:.2f}.")
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 6: Two identical Transactions
+'''
+print(" ")
+print("----------TEST 6----------")
+print("  Two identical Transactions")
+print(" ")
+testCharge1 = swipe_card()
+testCharge1.amount = 250.00
+testCharge1.approval_status = "Approved"
+testCharge1.category = "Groceries"
+testCharge2 = swipe_card()
+testCharge2.customer_id = testCharge1.customer_id
+testCharge2.timestamp = testCharge1.timestamp
+testCharge2.merchant_name = testCharge1.merchant_name
+testCharge2.category = testCharge1.category
+testCharge2.amount = testCharge1.amount
+testCharge2.location = testCharge1.location
+testCharge2.card_type = testCharge1.card_type
+testCharge2.approval_status = testCharge1.approval_status
+testCharge2.payment_method = testCharge1.payment_method
+
+flag_fraud(main_cursor, testCharge1) # should be not fraud
+flag_fraud(main_cursor, testCharge2) # should be fraud
+delete_transaction(main_cursor, testCharge1.transaction_id)
+delete_transaction(main_cursor, testCharge2.transaction_id)
+'''
+
+# TEST 7: Transaction outside of customer's normal location
+'''
+print(" ")
+print("----------TEST 7----------")
+print("  Transaction outside of customer normal location")
+print(" ")
+testCharge = swipe_card()
+testCharge.amount = 250.00
+testCharge.approval_status = "Approved"
+testCharge.category = "Groceries"
+testCharge.location = "London"
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 8: Unexpected category for customer's age
+'''
+print(" ")
+print("----------TEST 8----------")
+print("  Unexpected category for customer age")
+print(" ")
+testCharge = swipe_card()
+testCharge.customer_id = "951cfea37" # an existing customer under 21
+testCharge.amount = 250.00
+testCharge.approval_status = "Approved"
+testCharge.category = "Car Rental"
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 9: Three different flags on one transaction
+'''
+print(" ")
+print("----------TEST 9----------")
+print("  Three different flags on one transaction")
+print(" ")
+testCharge = swipe_card()
+testCharge.approval_status = "Approved"
+testCharge.customer_id = "951cfea37" # an existing customer under 21
+testCharge.category = "Car Rental" # age fraud
+testCharge.amount = 1000.00 # out of expected bounds for category
+testCharge.location = "London" # out of common location
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+# TEST 10: Non-fraudulent charge
+'''
+print(" ")
+print("----------TEST 10----------")
+print("  A Non-fraudulent charge")
+print(" ")
+testCharge = swipe_card()
+testCustomer = find_customer(main_cursor, testCharge.customer_id)
+testCharge.amount = 250.00
+testCharge.approval_status = "Approved"
+testCharge.category = "Groceries"
+testCharge.location = testCustomer.location
+flag_fraud(main_cursor, testCharge)
+delete_transaction(main_cursor, testCharge.transaction_id)
+'''
+
+
+
+
+
+
+
+
+
 
 
 
